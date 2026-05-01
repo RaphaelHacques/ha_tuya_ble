@@ -933,16 +933,12 @@ class TuyaBLEDevice:
         response_to: int = 0,
     ) -> list[bytes]:
         key: bytes
-        iv = b"\x00" * 16 if self._protocol_version == 3 else secrets.token_bytes(16)
+        iv = b"\x00" * 16
         security_flag: bytes
-        if code in (TuyaBLECode.FUN_SENDER_DEVICE_INFO, TuyaBLECode.FUN_SENDER_PAIR):
-            key = self._login_key
-            security_flag = b"\x04"
-            _LOGGER.debug("%s: Building packet with login_key (len=%s, flag=%s) for code %s", self.address, len(key), security_flag.hex(), code.name)
-        else:
-            key = self._session_key
-            security_flag = b"\x05"
-            _LOGGER.debug("%s: Building packet with session_key (len=%s, flag=%s)", self.address, len(key or b""), security_flag.hex())
+        # Testing Flag 00 (No security)
+        key = self._login_key
+        security_flag = b"\x00"
+        _LOGGER.debug("%s: Building UNENCRYPTED packet (flag 00) for code %s", self.address, code.name)
 
         raw = bytearray()
         raw += pack(">IIHH", seq_num, response_to, code.value, len(data))
@@ -952,8 +948,11 @@ class TuyaBLEDevice:
         while len(raw) % 16 != 0:
             raw += b"\x00"
 
-        cipher = AES.new(key, AES.MODE_CBC, iv)
-        encrypted = security_flag + iv + cipher.encrypt(raw)
+        if security_flag == b"\x00":
+            encrypted = security_flag + raw
+        else:
+            cipher = AES.new(key, AES.MODE_CBC, iv)
+            encrypted = security_flag + iv + cipher.encrypt(raw)
 
         command = []
         packet_num = 0
