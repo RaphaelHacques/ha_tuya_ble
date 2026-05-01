@@ -434,7 +434,12 @@ class TuyaBLEDevice:
                 )
                 if manufacturer_data and len(manufacturer_data) > 6:
                     self._is_bound = (manufacturer_data[0] & 0x80) != 0
-                    self._protocol_version = manufacturer_data[1]
+                    self._protocol_version = manufacturer_data[0] >> 4
+                    _LOGGER.debug("%s: Raw manufacturer data: %s", self.address, manufacturer_data.hex())
+                    # Force V4 for Fingerbot Touch bs3ubslo
+                    if "bs3ubslo" in str(self._device_info.product_id if self._device_info else ""):
+                         _LOGGER.debug("%s: Forcing Protocol V4 for Fingerbot Touch", self.address)
+                         self._protocol_version = 4
                     _LOGGER.debug("%s: Detected protocol version: %s", self.address, self._protocol_version)
                     raw_uuid = manufacturer_data[6:]
                     if raw_product_id:
@@ -792,9 +797,8 @@ class TuyaBLEDevice:
                         continue
                 
                 if self._client and self._client.is_connected:
-                    '''
                     if not self._is_paired:
-                        _LOGGER.debug("%s: Sending pairing request (Protocol V3)", self.address)
+                        _LOGGER.debug("%s: Sending pairing request (Handshake)", self.address)
                         pairing_data = self._build_pairing_request()
                         try:
                             if not await asyncio.wait_for(
@@ -807,15 +811,19 @@ class TuyaBLEDevice:
                                 timeout=20.0
                             ):
                                 _LOGGER.error("%s: Pairing failed (no response)", self.address)
-                                # self._client = None
-                                # await asyncio.sleep(backoff)
-                                # continue
+                                self._client = None
+                                await asyncio.sleep(backoff)
+                                backoff *= 2.0
+                                continue
                         except asyncio.TimeoutError:
                             _LOGGER.error("%s: Pairing timed out", self.address)
+                            self._client = None
+                            await asyncio.sleep(backoff)
+                            backoff *= 2.0
+                            continue
                         
                         self._is_paired = True
-                        _LOGGER.debug("%s: Proceeding without confirmed pairing", self.address)
-                    '''
+                        _LOGGER.debug("%s: Pairing successful", self.address)
 
                     _LOGGER.debug("%s: Sending device info request", self.address)
                     try:
@@ -933,12 +941,16 @@ class TuyaBLEDevice:
         response_to: int = 0,
     ) -> list[bytes]:
         key: bytes
-        iv = b"\x00" * 16
+        iv = secrets.token_bytes(16)
         security_flag: bytes
-        # Testing Flag 00 (No security)
-        key = self._login_key
-        security_flag = b"\x00"
-        _LOGGER.debug("%s: Building UNENCRYPTED packet (flag 00) for code %s", self.address, code.name)
+        if code in (TuyaBLECode.FUN_SENDER_DEVICE_INFO, TuyaBLECode.FUN_SENDER_PAIR):
+            key = self._login_key
+            security_flag = b"\x04"
+            _LOGGER.debug("%s: Building packet with login_key (len=%s, flag=%s) for code %s", self.address, len(key), security_flag.hex(), code.name)
+        else:
+            key = self._session_key
+            security_flag = b"\x05"
+            _LOGGER.debug("%s: Building packet with session_key (len=%s, flag=%s)", self.address, len(key or b""), security_flag.hex())
 
         raw = bytearray()
         raw += pack(">IIHH", seq_num, response_to, code.value, len(data))
@@ -948,11 +960,8 @@ class TuyaBLEDevice:
         while len(raw) % 16 != 0:
             raw += b"\x00"
 
-        if security_flag == b"\x00":
-            encrypted = security_flag + raw
-        else:
-            cipher = AES.new(key, AES.MODE_CBC, iv)
-            encrypted = security_flag + iv + cipher.encrypt(raw)
+        cipher = AES.new(key, AES.MODE_CBC, iv)
+        encrypted = security_flag + iv + cipher.encrypt(raw)
 
         command = []
         packet_num = 0
