@@ -270,7 +270,7 @@ class HASSTuyaBLEDeviceManager(AbstaractTuyaBLEDeviceManager):
             if cache_key:
                 item = _cache.get(cache_key)
 
-            if item is None or force_update:
+            if item is None or force_update or (item and address not in item.credentials):
                 if self._is_login_success(await self.login(True)):
                     item = _cache.get(cache_key)
                     if item:
