@@ -933,7 +933,7 @@ class TuyaBLEDevice:
         response_to: int = 0,
     ) -> list[bytes]:
         key: bytes
-        iv = secrets.token_bytes(16)
+        iv = b"\x00" * 16 if self._protocol_version == 3 else secrets.token_bytes(16)
         security_flag: bytes
         if code in (TuyaBLECode.FUN_SENDER_DEVICE_INFO, TuyaBLECode.FUN_SENDER_PAIR):
             key = self._login_key
