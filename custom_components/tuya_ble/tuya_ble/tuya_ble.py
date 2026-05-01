@@ -313,7 +313,7 @@ class TuyaBLEDevice:
         self._advertisement_data = advertisement_data
 
     async def initialize(self) -> None:
-        _LOGGER.debug("%s: Initializing (Adv data: %s)", self.address, "Present" if self._advertisement_data else "Missing")
+        _LOGGER.debug("!!! TUYA BLE DEBUG: INITIALIZING %s !!! (Adv data: %s)", self.address, "Present" if self._advertisement_data else "Missing")
         self._decode_advertisement_data()
         await self._update_device_info()
             
