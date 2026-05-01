@@ -322,7 +322,7 @@ class TuyaBLEDevice:
         result = bytearray()
 
         result += self._device_info.uuid.encode()
-        if self._protocol_version == 4:
+        if self._protocol_version >= 3:
             result += self._local_key[:6]
         else:
             result += self._local_key
@@ -366,7 +366,7 @@ class TuyaBLEDevice:
                     self._local_key = self._device_info.local_key.encode()
                     # For protocol version 4, we use only first 6 characters for login key
                     # For protocol version 5 and others, we use the full 16 characters
-                    if self._protocol_version == 4:
+                    if self._protocol_version >= 3:
                         _LOGGER.debug("%s: Using TRUNCATED (6 bytes) local key for login_key", self.address)
                         self._login_key = hashlib.md5(self._local_key[:6]).digest()
                     else:
@@ -938,7 +938,7 @@ class TuyaBLEDevice:
     ) -> list[bytes]:
         key: bytes
         # For Protocol V4 pairing, some devices (like Fingerbot) expect a zero IV
-        if self._protocol_version == 4 and code == TuyaBLECode.FUN_SENDER_PAIR:
+        if self._protocol_version >= 3 and code == TuyaBLECode.FUN_SENDER_PAIR:
             iv = b"\x00" * 16
         else:
             iv = secrets.token_bytes(16)
