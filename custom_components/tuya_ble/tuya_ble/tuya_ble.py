@@ -361,12 +361,18 @@ class TuyaBLEDevice:
                     self._ble_device.address, False
                 )
             if self._device_info:
+                if self.product_id == "bs3ubslo":
+                    self._protocol_version = 4
+                    _LOGGER.debug("%s: Forcing protocol version 4 for Fingerbot (bs3ubslo)", self.address)
+                
                 self._local_key = self._device_info.local_key.encode()
                 # For protocol version 4, we use only first 6 characters for login key
                 # For protocol version 5 and others, we use the full 16 characters
                 if self._protocol_version == 4:
+                    _LOGGER.debug("%s: Using TRUNCATED (6 bytes) local key for login_key", self.address)
                     self._login_key = hashlib.md5(self._local_key[:6]).digest()
                 else:
+                    _LOGGER.debug("%s: Using FULL (16 bytes) local key for login_key", self.address)
                     self._login_key = hashlib.md5(self._local_key).digest()
 
                 self.append_functions(self._device_info.functions, self._device_info.status_range)
