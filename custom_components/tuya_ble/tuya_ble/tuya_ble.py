@@ -277,7 +277,7 @@ class TuyaBLEDevice:
 
         self._is_bound = False
         self._flags = 0
-        self._protocol_version = 2
+        self._protocol_version = 4
 
         self._device_version: str = ""
         self._protocol_version_str: str = ""
@@ -313,7 +313,7 @@ class TuyaBLEDevice:
         self._advertisement_data = advertisement_data
 
     async def initialize(self) -> None:
-        _LOGGER.debug("%s: Initializing", self.address)
+        _LOGGER.debug("%s: Initializing (Adv data: %s)", self.address, "Present" if self._advertisement_data else "Missing")
         self._decode_advertisement_data()
         await self._update_device_info()
             
