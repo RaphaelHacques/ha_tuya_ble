@@ -373,7 +373,7 @@ class TuyaBLEDevice:
                         _LOGGER.debug("%s: Using FULL (16 bytes) local key for login_key (Protocol V%s)", self.address, self._protocol_version)
                         self._login_key = hashlib.md5(self._local_key).digest()
 
-                self.append_functions(self._device_info.functions, self._device_info.status_range)
+                    self.append_functions(self._device_info.functions, self._device_info.status_range)
 
         return self._device_info is not None
 
