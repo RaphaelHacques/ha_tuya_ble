@@ -942,7 +942,11 @@ class TuyaBLEDevice:
         response_to: int = 0,
     ) -> list[bytes]:
         key: bytes
-        iv = secrets.token_bytes(16)
+        # For Protocol V4 pairing, some devices (like Fingerbot) expect a zero IV
+        if self._protocol_version == 4 and code == TuyaBLECode.FUN_SENDER_PAIR:
+            iv = b"\x00" * 16
+        else:
+            iv = secrets.token_bytes(16)
         security_flag: bytes
         if code in (TuyaBLECode.FUN_SENDER_DEVICE_INFO, TuyaBLECode.FUN_SENDER_PAIR):
             key = self._login_key
