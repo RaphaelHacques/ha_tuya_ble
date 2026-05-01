@@ -930,10 +930,10 @@ class TuyaBLEDevice:
         key: bytes
         iv = secrets.token_bytes(16)
         security_flag: bytes
-        if code == TuyaBLECode.FUN_SENDER_DEVICE_INFO:
+        if code in (TuyaBLECode.FUN_SENDER_DEVICE_INFO, TuyaBLECode.FUN_SENDER_PAIR):
             key = self._login_key
             security_flag = b"\x04"
-            _LOGGER.debug("%s: Building packet with login_key (len=%s, flag=%s)", self.address, len(key), security_flag.hex())
+            _LOGGER.debug("%s: Building packet with login_key (len=%s, flag=%s) for code %s", self.address, len(key), security_flag.hex(), code.name)
         else:
             key = self._session_key
             security_flag = b"\x05"
