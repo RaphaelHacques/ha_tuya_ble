@@ -748,15 +748,18 @@ class TuyaBLEDevice:
                         self.rssi,
                         exc_info=True,
                     )
+                    await asyncio.sleep(BLEAK_BACKOFF_TIME)
                     continue
                 except BLEAK_EXCEPTIONS:
                     _LOGGER.debug(
                         "%s: communication failed", self.address, exc_info=True
                     )
+                    await asyncio.sleep(BLEAK_BACKOFF_TIME)
                     continue
                 except:
                     _LOGGER.debug("%s: unexpected error",
                                   self.address, exc_info=True)
+                    await asyncio.sleep(BLEAK_BACKOFF_TIME)
                     continue
 
                 if client and client.is_connected:
@@ -767,12 +770,23 @@ class TuyaBLEDevice:
                         await self._client.start_notify(
                             CHARACTERISTIC_NOTIFY, self._notification_handler
                         )
+                    except BleakDBusError as e:
+                        if "Notify acquired" in str(e):
+                            _LOGGER.debug("%s: Notifications already active", self.address)
+                        else:
+                            self._client = None
+                            _LOGGER.error("%s: starting notifications failed",
+                                          self.address, exc_info=True)
+                            await asyncio.sleep(BLEAK_BACKOFF_TIME)
+                            continue
                     except:  # [BLEAK_EXCEPTIONS, BleakNotFoundError]:
                         self._client = None
                         _LOGGER.error("%s: starting notifications failed",
                                       self.address, exc_info=True)
+                        await asyncio.sleep(BLEAK_BACKOFF_TIME)
                         continue
                 else:
+                    await asyncio.sleep(BLEAK_BACKOFF_TIME)
                     continue
 
                 if self._client and self._client.is_connected:
