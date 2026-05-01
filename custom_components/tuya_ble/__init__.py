@@ -44,7 +44,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             f"Could not find Tuya BLE device with address {address}"
         )
     manager = HASSTuyaBLEDeviceManager(hass, entry.options.copy())
-    device = TuyaBLEDevice(manager, ble_device)
+    service_info = bluetooth.async_last_service_info(hass, address.upper(), True)
+    device = TuyaBLEDevice(
+        manager,
+        ble_device,
+        service_info.advertisement if service_info else None
+    )
     await device.initialize()
     product_info = get_device_product_info(device)
 
