@@ -431,6 +431,7 @@ class TuyaBLEDevice:
                 if manufacturer_data and len(manufacturer_data) > 6:
                     self._is_bound = (manufacturer_data[0] & 0x80) != 0
                     self._protocol_version = manufacturer_data[1]
+                    _LOGGER.debug("%s: Detected protocol version: %s", self.address, self._protocol_version)
                     raw_uuid = manufacturer_data[6:]
                     if raw_product_id:
                         key = hashlib.md5(raw_product_id).digest()
@@ -684,9 +685,10 @@ class TuyaBLEDevice:
                 asyncio.create_task(self._reconnect())
         else:
             _LOGGER.warning(
-                "%s: Device unexpectedly disconnected; RSSI: %s",
+                "%s: Device unexpectedly disconnected; RSSI: %s (Client was connected: %s)",
                 self.address,
                 self.rssi,
+                client.is_connected if client else "None"
             )
 
     def _disconnect(self) -> None:
@@ -732,7 +734,7 @@ class TuyaBLEDevice:
             await asyncio.sleep(0.01)
             if self._client and self._client.is_connected and self._is_paired:
                 return
-            attempts_count = 100
+            attempts_count = 3
             while attempts_count > 0:
                 attempts_count -= 1
                 if attempts_count == 0:
@@ -784,6 +786,7 @@ class TuyaBLEDevice:
                         await self._client.start_notify(
                             CHARACTERISTIC_NOTIFY, self._notification_handler
                         )
+                        _LOGGER.debug("%s: Notifications started successfully", self.address)
                     except BleakDBusError as e:
                         if "Notify acquired" in str(e):
                             _LOGGER.debug("%s: Notifications already active", self.address)
@@ -944,9 +947,11 @@ class TuyaBLEDevice:
         if code == TuyaBLECode.FUN_SENDER_DEVICE_INFO:
             key = self._login_key
             security_flag = b"\x04"
+            _LOGGER.debug("%s: Building packet with login_key (len=%s, flag=%s)", self.address, len(key), security_flag.hex())
         else:
             key = self._session_key
             security_flag = b"\x05"
+            _LOGGER.debug("%s: Building packet with session_key (len=%s, flag=%s)", self.address, len(key or b""), security_flag.hex())
 
         raw = bytearray()
         raw += pack(">IIHH", seq_num, response_to, code.value, len(data))
@@ -1426,9 +1431,11 @@ class TuyaBLEDevice:
 
         self._handle_command_or_response(seq_num, response_to, code, data)
 
-    def _notification_handler(self, _sender: int, data: bytearray) -> None:
-        """Handle notification responses."""
-        _LOGGER.debug("%s: Packet received: %s", self.address, data.hex())
+    def _notification_handler(self, _sender: Any, data: bytearray) -> None:
+        """Handle notifications."""
+        _LOGGER.debug("%s: Received notification: %s", self.address, data.hex())
+        if self._input_buffer is None:
+            _LOGGER.debug("%s: Packet received: %s", self.address, data.hex())
 
         pos: int = 0
         packet_num: int
