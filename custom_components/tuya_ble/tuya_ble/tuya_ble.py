@@ -314,14 +314,17 @@ class TuyaBLEDevice:
 
     async def initialize(self) -> None:
         _LOGGER.debug("%s: Initializing", self.address)
-        if await self._update_device_info():
-            self._decode_advertisement_data()
+        self._decode_advertisement_data()
+        await self._update_device_info()
             
     def _build_pairing_request(self) -> bytes:
         result = bytearray()
 
         result += self._device_info.uuid.encode()
-        result += self._local_key
+        if self._protocol_version == 4:
+            result += self._local_key[:6]
+        else:
+            result += self._local_key
         result += self._device_info.device_id.encode()
         for _ in range(44 - len(result)):
             result += b"\x00"
@@ -358,8 +361,13 @@ class TuyaBLEDevice:
                     self._ble_device.address, False
                 )
             if self._device_info:
-                self._local_key = self._device_info.local_key[:6].encode()
-                self._login_key = hashlib.md5(self._local_key).digest()
+                self._local_key = self._device_info.local_key.encode()
+                # For protocol version 4, we use only first 6 characters for login key
+                # For protocol version 5 and others, we use the full 16 characters
+                if self._protocol_version == 4:
+                    self._login_key = hashlib.md5(self._local_key[:6]).digest()
+                else:
+                    self._login_key = hashlib.md5(self._local_key).digest()
 
                 self.append_functions(self._device_info.functions, self._device_info.status_range)
 
@@ -644,6 +652,12 @@ class TuyaBLEDevice:
             return
         self._client = None
         self._fire_connection_status_callbacks()
+
+        # Fail all pending futures
+        for seq_num, future in self._input_expected_responses.items():
+            if future and not future.done():
+                future.set_exception(BleakError(f"Disconnected while waiting for response to #{seq_num}"))
+        self._input_expected_responses.clear()
         
         if was_paired:
             # Decide whether to schedule an automatic reconnect.
@@ -1250,8 +1264,9 @@ class TuyaBLEDevice:
                 self._is_bound = data[5] != 0
 
                 srand = data[6:12]
+                key_material = self._local_key[:6] if self._protocol_version == 4 else self._local_key
                 self._session_key = hashlib.md5(
-                    self._local_key + srand).digest()
+                    key_material + srand).digest()
                 self._auth_key = data[14:46]
 
             case TuyaBLECode.FUN_SENDER_PAIR:
