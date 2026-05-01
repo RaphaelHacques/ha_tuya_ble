@@ -361,10 +361,6 @@ class TuyaBLEDevice:
                     self._ble_device.address, False
                 )
             if self._device_info:
-                if self.product_id == "bs3ubslo":
-                    self._protocol_version = 4
-                    _LOGGER.debug("%s: Forcing protocol version 4 for Fingerbot (bs3ubslo)", self.address)
-                
                 self._local_key = self._device_info.local_key.encode()
                 # For protocol version 4, we use only first 6 characters for login key
                 # For protocol version 5 and others, we use the full 16 characters
@@ -372,7 +368,7 @@ class TuyaBLEDevice:
                     _LOGGER.debug("%s: Using TRUNCATED (6 bytes) local key for login_key", self.address)
                     self._login_key = hashlib.md5(self._local_key[:6]).digest()
                 else:
-                    _LOGGER.debug("%s: Using FULL (16 bytes) local key for login_key", self.address)
+                    _LOGGER.debug("%s: Using FULL (16 bytes) local key for login_key (Protocol V%s)", self.address, self._protocol_version)
                     self._login_key = hashlib.md5(self._local_key).digest()
 
                 self.append_functions(self._device_info.functions, self._device_info.status_range)
@@ -813,6 +809,21 @@ class TuyaBLEDevice:
                     continue
 
                 if self._client and self._client.is_connected:
+                    if not self._is_paired:
+                        _LOGGER.debug("%s: Sending pairing request", self.address)
+                        pairing_data = self._build_pairing_request()
+                        if not await self._send_packet_while_connected(
+                            TuyaBLECode.FUN_SENDER_PAIR,
+                            pairing_data,
+                            0,
+                            True,
+                        ):
+                            self._client = None
+                            _LOGGER.error("%s: Pairing request failed", self.address)
+                            continue
+                        self._is_paired = True
+                        _LOGGER.debug("%s: Pairing successful", self.address)
+
                     _LOGGER.debug(
                         "%s: Sending device info request", self.address)
                     try:
