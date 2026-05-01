@@ -363,11 +363,6 @@ class TuyaBLEDevice:
                         self._ble_device.address, False
                     )
                 if self._device_info:
-                    # Force V4 for Fingerbot Touch bs3ubslo
-                    if "bs3ubslo" in str(self._device_info.product_id):
-                         _LOGGER.debug("%s: Forcing Protocol V4 for Fingerbot Touch", self.address)
-                         self._protocol_version = 4
-
                     self._local_key = self._device_info.local_key.encode()
                     # For protocol version 4, we use only first 6 characters for login key
                     # For protocol version 5 and others, we use the full 16 characters
