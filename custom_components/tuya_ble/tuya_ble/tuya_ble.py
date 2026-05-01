@@ -775,6 +775,15 @@ class TuyaBLEDevice:
                             CHARACTERISTIC_NOTIFY, self._notification_handler
                         )
                         _LOGGER.debug("%s: Notifications started successfully", self.address)
+                    except BleakDBusError as e:
+                        if "Notify acquired" in str(e):
+                            _LOGGER.debug("%s: Notifications already active", self.address)
+                        else:
+                            _LOGGER.error("%s: Notifications failed", self.address, exc_info=True)
+                            self._client = None
+                            await asyncio.sleep(backoff)
+                            backoff *= 2.0
+                            continue
                     except:
                         _LOGGER.error("%s: Notifications failed", self.address, exc_info=True)
                         self._client = None
@@ -795,7 +804,7 @@ class TuyaBLEDevice:
                                     0,
                                     True,
                                 ),
-                                timeout=10.0
+                                timeout=20.0
                             ):
                                 _LOGGER.error("%s: Pairing failed (no response)", self.address)
                                 self._client = None
@@ -822,7 +831,7 @@ class TuyaBLEDevice:
                                 0,
                                 True,
                             ),
-                            timeout=10.0
+                            timeout=20.0
                         ):
                             _LOGGER.error("%s: Device info request failed", self.address)
                             self._client = None
@@ -1417,9 +1426,8 @@ class TuyaBLEDevice:
 
         self._handle_command_or_response(seq_num, response_to, code, data)
 
-    def _notification_handler(self, _sender: Any, data: bytearray) -> None:
-        """Handle notifications."""
-        _LOGGER.debug("%s: Received notification: %s", self.address, data.hex())
+    def _notification_handler(self, characteristic: Any, data: bytes) -> None:
+        _LOGGER.debug("%s: Received raw notification: %s", self.address, data.hex())
         if self._input_buffer is None:
             _LOGGER.debug("%s: Packet received: %s", self.address, data.hex())
 
