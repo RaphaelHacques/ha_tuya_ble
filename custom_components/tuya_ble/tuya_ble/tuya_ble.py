@@ -792,10 +792,10 @@ class TuyaBLEDevice:
                         continue
                 
                 if self._client and self._client.is_connected:
+                    '''
                     if not self._is_paired:
-                        _LOGGER.debug("%s: Sending pairing request", self.address)
+                        _LOGGER.debug("%s: Sending pairing request (Protocol V3)", self.address)
                         pairing_data = self._build_pairing_request()
-                        # Use shorter timeout for handshake
                         try:
                             if not await asyncio.wait_for(
                                 self._send_packet_while_connected(
@@ -807,19 +807,15 @@ class TuyaBLEDevice:
                                 timeout=20.0
                             ):
                                 _LOGGER.error("%s: Pairing failed (no response)", self.address)
-                                self._client = None
-                                await asyncio.sleep(backoff)
-                                backoff *= 2.0
-                                continue
+                                # self._client = None
+                                # await asyncio.sleep(backoff)
+                                # continue
                         except asyncio.TimeoutError:
                             _LOGGER.error("%s: Pairing timed out", self.address)
-                            self._client = None
-                            await asyncio.sleep(backoff)
-                            backoff *= 2.0
-                            continue
                         
                         self._is_paired = True
-                        _LOGGER.debug("%s: Pairing successful", self.address)
+                        _LOGGER.debug("%s: Proceeding without confirmed pairing", self.address)
+                    '''
 
                     _LOGGER.debug("%s: Sending device info request", self.address)
                     try:
@@ -975,6 +971,7 @@ class TuyaBLEDevice:
                 pos:pos + GATT_MTU - len(packet)  # fmt: skip
             ]
             packet += data_part
+            _LOGGER.debug("%s: Sending raw packet part: %s", self.address, packet.hex())
             command.append(packet)
 
             pos += len(data_part)
