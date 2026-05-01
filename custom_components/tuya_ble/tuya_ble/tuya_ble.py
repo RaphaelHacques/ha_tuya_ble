@@ -293,6 +293,7 @@ class TuyaBLEDevice:
         self._is_paired = False
 
         self._input_buffer: bytearray | None = None
+        self._init_lock = asyncio.Lock()
         self._input_expected_packet_num = 0
         self._input_expected_length = 0
         self._input_expected_responses: dict[int,
@@ -355,12 +356,13 @@ class TuyaBLEDevice:
         await self._send_packet(TuyaBLECode.FUN_SENDER_DEVICE_STATUS, bytes())
 
     async def _update_device_info(self) -> bool:
-        if self._device_info is None:
-            if self._device_manager:
-                self._device_info = await self._device_manager.get_device_credentials(
-                    self._ble_device.address, False
-                )
-            if self._device_info:
+        async with self._init_lock:
+            if self._device_info is None:
+                if self._device_manager:
+                    self._device_info = await self._device_manager.get_device_credentials(
+                        self._ble_device.address, False
+                    )
+                if self._device_info:
                 self._local_key = self._device_info.local_key.encode()
                 # For protocol version 4, we use only first 6 characters for login key
                 # For protocol version 5 and others, we use the full 16 characters
@@ -737,6 +739,7 @@ class TuyaBLEDevice:
             if self._client and self._client.is_connected and self._is_paired:
                 return
             attempts_count = 3
+            backoff = 1.0
             while attempts_count > 0:
                 attempts_count -= 1
                 if attempts_count == 0:
@@ -746,11 +749,10 @@ class TuyaBLEDevice:
                         self.rssi,
                     )
                     raise BleakNotFoundError()
+                
+                _LOGGER.debug("%s: Connection attempt (%s left), backoff: %ss", self.address, attempts_count, backoff)
                 try:
                     async with global_connect_lock:
-                        _LOGGER.debug(
-                            "%s: Connecting; RSSI: %s", self.address, self.rssi
-                        )
                         client = await establish_connection(
                             BleakClientWithServiceCache,
                             self._ble_device,
@@ -759,118 +761,85 @@ class TuyaBLEDevice:
                             use_services_cache=True,
                             ble_device_callback=lambda: self._ble_device,
                         )
-                except BleakNotFoundError:
-                    _LOGGER.error(
-                        "%s: device not found, not in range, or poor RSSI: %s",
-                        self.address,
-                        self.rssi,
-                        exc_info=True,
-                    )
-                    await asyncio.sleep(BLEAK_BACKOFF_TIME)
-                    continue
-                except BLEAK_EXCEPTIONS:
-                    _LOGGER.debug(
-                        "%s: communication failed", self.address, exc_info=True
-                    )
-                    await asyncio.sleep(BLEAK_BACKOFF_TIME)
-                    continue
-                except:
-                    _LOGGER.debug("%s: unexpected error",
-                                  self.address, exc_info=True)
-                    await asyncio.sleep(BLEAK_BACKOFF_TIME)
-                    continue
-
-                if client and client.is_connected:
-                    _LOGGER.debug("%s: Connected; RSSI: %s",
-                                  self.address, self.rssi)
                     self._client = client
+                except:
+                    _LOGGER.error("%s: Connection failed", self.address, exc_info=True)
+                    await asyncio.sleep(backoff)
+                    backoff *= 2.0
+                    continue
+                
+                if self._client and self._client.is_connected:
+                    _LOGGER.debug("%s: Connected successfully", self.address)
                     try:
                         await self._client.start_notify(
                             CHARACTERISTIC_NOTIFY, self._notification_handler
                         )
                         _LOGGER.debug("%s: Notifications started successfully", self.address)
-                    except BleakDBusError as e:
-                        if "Notify acquired" in str(e):
-                            _LOGGER.debug("%s: Notifications already active", self.address)
-                        else:
-                            self._client = None
-                            _LOGGER.error("%s: starting notifications failed",
-                                          self.address, exc_info=True)
-                            await asyncio.sleep(BLEAK_BACKOFF_TIME)
-                            continue
-                    except:  # [BLEAK_EXCEPTIONS, BleakNotFoundError]:
+                    except:
+                        _LOGGER.error("%s: Notifications failed", self.address, exc_info=True)
                         self._client = None
-                        _LOGGER.error("%s: starting notifications failed",
-                                      self.address, exc_info=True)
-                        await asyncio.sleep(BLEAK_BACKOFF_TIME)
+                        await asyncio.sleep(backoff)
+                        backoff *= 2.0
                         continue
-                else:
-                    await asyncio.sleep(BLEAK_BACKOFF_TIME)
-                    continue
-
+                
                 if self._client and self._client.is_connected:
                     if not self._is_paired:
                         _LOGGER.debug("%s: Sending pairing request", self.address)
                         pairing_data = self._build_pairing_request()
-                        if not await self._send_packet_while_connected(
-                            TuyaBLECode.FUN_SENDER_PAIR,
-                            pairing_data,
-                            0,
-                            True,
-                        ):
+                        # Use shorter timeout for handshake
+                        try:
+                            if not await asyncio.wait_for(
+                                self._send_packet_while_connected(
+                                    TuyaBLECode.FUN_SENDER_PAIR,
+                                    pairing_data,
+                                    0,
+                                    True,
+                                ),
+                                timeout=10.0
+                            ):
+                                _LOGGER.error("%s: Pairing failed (no response)", self.address)
+                                self._client = None
+                                await asyncio.sleep(backoff)
+                                backoff *= 2.0
+                                continue
+                        except asyncio.TimeoutError:
+                            _LOGGER.error("%s: Pairing timed out", self.address)
                             self._client = None
-                            _LOGGER.error("%s: Pairing request failed", self.address)
+                            await asyncio.sleep(backoff)
+                            backoff *= 2.0
                             continue
+                        
                         self._is_paired = True
                         _LOGGER.debug("%s: Pairing successful", self.address)
 
-                    _LOGGER.debug(
-                        "%s: Sending device info request", self.address)
+                    _LOGGER.debug("%s: Sending device info request", self.address)
                     try:
-                        if not await self._send_packet_while_connected(
-                            TuyaBLECode.FUN_SENDER_DEVICE_INFO,
-                            bytes(0),
-                            0,
-                            True,
+                        # Use shorter timeout for handshake
+                        if not await asyncio.wait_for(
+                            self._send_packet_while_connected(
+                                TuyaBLECode.FUN_SENDER_DEVICE_INFO,
+                                bytes(0),
+                                0,
+                                True,
+                            ),
+                            timeout=10.0
                         ):
+                            _LOGGER.error("%s: Device info request failed", self.address)
                             self._client = None
-                            _LOGGER.error(
-                                "%s: Sending device info request failed",
-                                self.address,
-                            )
+                            await asyncio.sleep(backoff)
+                            backoff *= 2.0
                             continue
-                    except:  # [BLEAK_EXCEPTIONS, BleakNotFoundError]:
+                    except asyncio.TimeoutError:
+                        _LOGGER.error("%s: Device info request timed out", self.address)
                         self._client = None
-                        _LOGGER.error("%s: Sending device info request failed",
-                                      self.address, exc_info=True)
+                        await asyncio.sleep(backoff)
+                        backoff *= 2.0
                         continue
-                else:
-                    continue
-
+                
                 if self._client and self._client.is_connected:
-                    _LOGGER.debug("%s: Sending pairing request", self.address)
-                    try:
-                        if not await self._send_packet_while_connected(
-                            TuyaBLECode.FUN_SENDER_PAIR,
-                            self._build_pairing_request(),
-                            0,
-                            True,
-                        ):
-                            self._client = None
-                            _LOGGER.error(
-                                "%s: Sending pairing request failed",
-                                self.address,
-                            )
-                            continue
-                    except:  # [BLEAK_EXCEPTIONS, BleakNotFoundError]:
-                        self._client = None
-                        _LOGGER.error("%s: Sending pairing request failed",
-                                      self.address, exc_info=True)
-                        continue
-                else:
-                    continue
+                    # Final check before exiting the loop
+                    break
 
-                break
 
         if self._client:
             if self._client.is_connected:
